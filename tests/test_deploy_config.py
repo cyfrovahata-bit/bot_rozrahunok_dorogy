@@ -89,6 +89,9 @@ class StoragePathTest(unittest.TestCase):
 class RailwayFilesTest(unittest.TestCase):
     def test_railway_json_valid_and_starts_bot(self):
         config = json.loads(Path("railway.json").read_text(encoding="utf-8"))
+        # білдер не нав'язуємо: Railway сам обирає актуальний (зараз Railpack),
+        # а примусовий NIXPACKS ламав збірку Python
+        self.assertNotIn("builder", config.get("build", {}))
         self.assertEqual(
             config["deploy"]["startCommand"], "python -m delivery.bot.telegram"
         )

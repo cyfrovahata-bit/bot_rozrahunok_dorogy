@@ -2,7 +2,12 @@
 
 GitHub → Railway: кожен пуш у гілку автоматично перевикочує бота.
 Репозиторій містить `railway.json` (команда старту) і `.python-version`
-(версія Python). Решту Nixpacks визначає сам за `requirements.txt`.
+(версія Python). Решту Railway визначає сам за `requirements.txt`.
+
+Білдер у `railway.json` навмисно не вказаний: Railway використовує свій
+поточний (Railpack), який коректно ставить Python і залежності. Не
+прописуйте `"builder": "NIXPACKS"` — стара збірка падає з
+`No module named pip`.
 
 ---
 
