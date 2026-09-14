@@ -451,12 +451,16 @@ def main() -> None:
     settings = Settings.load()
     if not settings.telegram_bot_token:
         raise SystemExit(
-            "TELEGRAM_BOT_TOKEN не заданий. Створіть бота у @BotFather "
-            "і впишіть токен у .env"
+            "TELEGRAM_BOT_TOKEN не заданий. Створіть бота у @BotFather і впишіть "
+            "токен туди, звідки читаються налаштування: локально — файл .env, "
+            "на Railway — вкладка Variables сервісу."
         )
     if not settings.manager_chat_ids:
         log.warning(
-            "MANAGER_CHAT_IDS порожній — запити на менеджера нікуди не надходитимуть."
+            "MANAGER_CHAT_IDS порожній — бот працюватиме, але запити «підключити "
+            "менеджера» нікуди не надходитимуть. Додайте chat_id менеджерів "
+            "(локально у .env, на Railway у Variables); кожен менеджер має сам "
+            "написати боту /start, інакше Telegram не дозволить боту йому писати."
         )
     asyncio.run(DeliveryBot(settings).run())
 

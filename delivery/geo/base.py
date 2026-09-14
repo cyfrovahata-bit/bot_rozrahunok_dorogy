@@ -51,8 +51,9 @@ def build_provider(settings) -> "DistanceProvider":
             if not settings.google_maps_api_key:
                 # Не валимо застосунок: працюємо на резерві, але гучно попереджаємо.
                 log.warning(
-                    "GEO_PROVIDER=google, але GOOGLE_MAPS_API_KEY порожній у .env — "
-                    "кілометраж рахується резервним способом (%s) і буде приблизним.",
+                    "GEO_PROVIDER=google, але GOOGLE_MAPS_API_KEY не заданий "
+                    "(локально — .env, на Railway — Variables) — кілометраж "
+                    "рахується резервним способом (%s) і буде приблизним.",
                     settings.geo_fallback or "offline",
                 )
                 return make(settings.geo_fallback or "offline")
