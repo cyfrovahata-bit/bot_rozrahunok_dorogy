@@ -35,6 +35,26 @@ def _int(name: str, default: int) -> int:
         return default
 
 
+def railway_volume_path() -> str:
+    """Шлях до змонтованого тому Railway (якщо він є).
+
+    Railway задає RAILWAY_VOLUME_MOUNT_PATH автоматично, коли до сервісу
+    прикріплено Volume. Без тому файлова система контейнера ефемерна:
+    після кожного деплою вона стирається разом із базою заявок.
+    """
+    return (os.getenv("RAILWAY_VOLUME_MOUNT_PATH") or "").strip()
+
+
+def on_railway() -> bool:
+    return bool(os.getenv("RAILWAY_ENVIRONMENT_NAME") or os.getenv("RAILWAY_ENVIRONMENT"))
+
+
+def _default_db_path() -> str:
+    """На Railway кладемо базу на том, локально — у ./data."""
+    volume = railway_volume_path()
+    return f"{volume.rstrip('/')}/delivery.sqlite3" if volume else "data/delivery.sqlite3"
+
+
 def _ids(name: str) -> tuple[int, ...]:
     raw = os.getenv(name, "") or ""
     out = []
@@ -91,7 +111,7 @@ class Settings:
             google_maps_api_key=os.getenv("GOOGLE_MAPS_API_KEY", "").strip(),
             nominatim_contact_email=os.getenv("NOMINATIM_CONTACT_EMAIL", "").strip(),
             geo_timeout_seconds=_int("GEO_TIMEOUT_SECONDS", 10),
-            db_path=os.getenv("DB_PATH") or "data/delivery.sqlite3",
+            db_path=os.getenv("DB_PATH") or _default_db_path(),
             tariffs_path=os.getenv("TARIFFS_PATH") or "config/tariffs.yaml",
             questions_path=os.getenv("QUESTIONS_PATH") or "config/questions.yaml",
             work_hours_start=_int("WORK_HOURS_START", 9),
@@ -105,3 +125,31 @@ class Settings:
     def path(self, value: str) -> Path:
         p = Path(value)
         return p if p.is_absolute() else ROOT / p
+
+    def storage_warnings(self) -> list[str]:
+        """Попередження про ризик втрати даних (насамперед на Railway).
+
+        Порожній список = база лежить у надійному місці.
+        """
+        if not on_railway():
+            return []
+
+        volume = railway_volume_path()
+        if not volume:
+            return [
+                "На Railway не прикріплено Volume: файлова система контейнера "
+                "стирається при КОЖНОМУ деплої, тож заявки й листування будуть "
+                "втрачені. Додайте том у налаштуваннях сервісу "
+                "(Settings → Volumes, mount path /data) — застосунок підхопить "
+                "його автоматично."
+            ]
+
+        db = self.path(self.db_path).resolve()
+        mount = Path(volume).resolve()
+        if mount not in db.parents and db != mount:
+            return [
+                f"База лежить за межами тому: DB_PATH={db}, том змонтовано в "
+                f"{mount}. Після деплою дані зникнуть. Виправлення: "
+                f"DB_PATH={mount}/delivery.sqlite3"
+            ]
+        return []

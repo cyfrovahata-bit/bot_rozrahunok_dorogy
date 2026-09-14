@@ -430,10 +430,20 @@ class DeliveryBot:
             await self._ask(message, session, result.question)
 
     async def run(self) -> None:
+        for warning in self.settings.storage_warnings():
+            log.error("УВАГА, ризик втрати даних: %s", warning)
+            for chat_id in self.settings.manager_chat_ids:
+                self.notifier.send_to_manager(str(chat_id), f"⚠ {warning}")
         me = await self.bot.get_me()
         log.info("Бот @%s запущено. Менеджери: %s", me.username,
                  self.settings.manager_chat_ids or "не задані")
-        await self.dp.start_polling(self.bot)
+        try:
+            await self.dp.start_polling(self.bot)
+        finally:
+            # Railway надсилає SIGTERM під час деплою — акуратно прощаємось,
+            # щоб Telegram одразу віддав polling новому контейнеру.
+            await self.bot.session.close()
+            log.info("Бот зупинено.")
 
 
 def main() -> None:
