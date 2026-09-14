@@ -1,8 +1,8 @@
 # Деплой на Railway
 
 GitHub → Railway: кожен пуш у гілку автоматично перевикочує бота.
-Репозиторій уже містить `railway.json` і `nixpacks.toml`, тож збірка
-працює без ручного налаштування.
+Репозиторій містить `railway.json` (команда старту) і `.python-version`
+(версія Python). Решту Nixpacks визначає сам за `requirements.txt`.
 
 ---
 

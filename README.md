@@ -138,7 +138,7 @@ python -m delivery.api.app     # документація: http://localhost:8000
 
 ## Деплой на Railway
 
-Репозиторій готовий до автодеплою: `railway.json` + `nixpacks.toml`,
+Репозиторій готовий до автодеплою: `railway.json`,
 кожен пуш у GitHub перевикочує бота.
 
 **Обов'язково прикріпіть Volume на `/data`** — інакше файлова система
@@ -157,7 +157,7 @@ python -m delivery.api.app     # документація: http://localhost:8000
 
 ```
 railway.json              конфігурація деплою
-nixpacks.toml             збірка контейнера
+.python-version           версія Python для збірки
 config/questions.yaml     5 блоків питань
 config/tariffs.yaml       тарифи й коефіцієнти
 delivery/
