@@ -1,0 +1,71 @@
+# ==========================================================
+#  Тарифи та коефіцієнти розрахунку.
+#  ЦИФРИ НИЖЧЕ — ДЕМОНСТРАЦІЙНІ. Замініть на свої реальні.
+#  Зміни підхоплюються без перезапуску коду (файл читається при старті).
+# ==========================================================
+version: "2026.09-demo"
+currency: "грн"
+round_to: 10          # округлення підсумку, грн
+min_price: 900        # мінімальна вартість замовлення
+base_fee: 350         # подача авто (фіксовано)
+
+# --- Тариф за кілометр: прогресивний, по відрізках ---
+# перші 50 км по 26 грн, далі до 200 км по 22 грн і т.д.
+distance_tiers:
+  - {up_to_km: 50,   rate: 26}
+  - {up_to_km: 200,  rate: 22}
+  - {up_to_km: 500,  rate: 18}
+  - {up_to_km: null, rate: 15}   # null = "і далі без обмежень"
+
+# --- Коефіцієнти (множники до транспортної складової) ---
+coefficients:
+  vehicle:
+    courier: 0.7
+    gazelle: 1.0
+    truck_5t: 1.35
+    truck_10t: 1.6
+    truck_20t: 2.0
+    refrigerator: 1.8
+  cargo_type:
+    general: 1.0
+    fragile: 1.15
+    oversized: 1.4
+    perishable: 1.25
+    dangerous: 1.6
+  urgency:
+    standard: 1.0
+    next_day: 1.15
+    today: 1.35
+    express: 1.6
+  temperature_mode:
+    none: 1.0
+    chilled: 1.2
+    frozen: 1.35
+
+# --- Вантажопідйомність і об'єм авто (для перевірки та підказки) ---
+vehicle_capacity:
+  courier:      {weight_kg: 500,   volume_m3: 2}
+  gazelle:      {weight_kg: 1500,  volume_m3: 9}
+  truck_5t:     {weight_kg: 5000,  volume_m3: 25}
+  truck_10t:    {weight_kg: 10000, volume_m3: 45}
+  truck_20t:    {weight_kg: 20000, volume_m3: 86}
+  refrigerator: {weight_kg: 5000,  volume_m3: 25}
+
+# --- Додаткові послуги ---
+surcharges:
+  loader_per_person: 450      # за одного вантажника
+  tail_lift: 300              # гідроборт
+  extra_stop: 250             # кожна додаткова точка
+  return_trip_ratio: 0.7      # зворотний рейс = 70% від тарифу за км
+  weekend_coefficient: 1.15   # субота/неділя
+  fuel_surcharge_percent: 5   # паливний збір, % від проміжної суми
+  insurance_percent: 0.5      # страхування, % від оголошеної вартості
+  insurance_min: 150          # мінімальна сума страхування
+  overweight_percent_per_ton: 12   # % надбавки за кожну почату тонну понад ліміт авто
+
+# --- Об'ємна вага ---
+# 1 м³ прирівнюється до N кг; до оплати береться більша з ваг
+volumetric_divisor_kg_per_m3: 250
+
+# --- Податки ---
+vat_percent: 20

@@ -1,0 +1,198 @@
+# ==========================================================
+#  Анкета розрахунку вартості доставки — 5 блоків питань.
+#  Правити можна без зміни коду: додайте/приберіть питання,
+#  змініть тексти або варіанти відповідей.
+#
+#  ВАЖЛИВО: значення (value) у блоках "vehicle_type", "cargo_type",
+#  "urgency", "temperature_mode" мусять збігатися з ключами
+#  коефіцієнтів у config/tariffs.yaml (це перевіряє тест
+#  tests/test_config_consistency.py).
+#
+#  Типи питань: text, phone, email, number, int, bool, choice,
+#               multichoice, date, address
+#  depends_on   — питання показується лише за умови
+#  required: false — можна пропустити (у боті кнопка «Пропустити»)
+# ==========================================================
+version: 1
+title: "Розрахунок вартості доставки"
+
+blocks:
+
+  # ---------- БЛОК 1 ----------
+  - id: client
+    title: "Блок 1 з 5. Про вас"
+    description: "Щоб ми знали, кому надіслати прорахунок."
+    questions:
+      - id: client_name
+        text: "Як до вас звертатися?"
+        type: text
+        min_len: 2
+        max_len: 60
+        placeholder: "Олександр"
+      - id: client_phone
+        text: "Номер телефону для зв'язку"
+        type: phone
+        help: "У форматі +380XXXXXXXXX або 0XXXXXXXXX"
+      - id: client_type
+        text: "Ви оформлюєте як..."
+        type: choice
+        options:
+          - {value: individual, label: "Фізична особа"}
+          - {value: company, label: "Юридична особа / ФОП"}
+      - id: company_name
+        text: "Назва компанії"
+        type: text
+        required: false
+        max_len: 120
+        depends_on: {question: client_type, equals: company}
+
+  # ---------- БЛОК 2 ----------
+  - id: route
+    title: "Блок 2 з 5. Маршрут"
+    description: "За цими даними автоматично рахується кілометраж."
+    questions:
+      - id: pickup_city
+        text: "Місто завантаження"
+        type: address
+        placeholder: "Київ"
+      - id: pickup_address
+        text: "Адреса завантаження (вулиця, будинок)"
+        type: address
+        required: false
+        placeholder: "вул. Хрещатик, 22"
+      - id: dropoff_city
+        text: "Місто розвантаження"
+        type: address
+        placeholder: "Львів"
+      - id: dropoff_address
+        text: "Адреса розвантаження (вулиця, будинок)"
+        type: address
+        required: false
+      - id: extra_stops
+        text: "Скільки додаткових точок по дорозі?"
+        type: int
+        min: 0
+        max: 10
+        default: 0
+      - id: return_trip
+        text: "Потрібен зворотний рейс (туди-назад)?"
+        type: bool
+        default: false
+
+  # ---------- БЛОК 3 ----------
+  - id: cargo
+    title: "Блок 3 з 5. Вантаж"
+    description: "Вартість рахується за більшою з двох ваг: фактичною або об'ємною."
+    questions:
+      - id: cargo_type
+        text: "Тип вантажу"
+        type: choice
+        options:
+          - {value: general, label: "Звичайний (генеральний)"}
+          - {value: fragile, label: "Крихкий (скло, техніка)"}
+          - {value: oversized, label: "Негабарит"}
+          - {value: perishable, label: "Швидкопсувний"}
+          - {value: dangerous, label: "Небезпечний (ADR)"}
+      - id: weight_kg
+        text: "Загальна вага вантажу, кг"
+        type: number
+        min: 0.1
+        max: 40000
+        unit: "кг"
+      - id: volume_m3
+        text: "Об'єм вантажу, м³"
+        type: number
+        min: 0
+        max: 120
+        unit: "м³"
+        help: "Приблизно: довжина × ширина × висота в метрах. Якщо не знаєте — поставте 0."
+      - id: packages
+        text: "Кількість місць (палет/коробок)"
+        type: int
+        min: 1
+        max: 500
+        default: 1
+      - id: declared_value
+        text: "Оголошена вартість вантажу, грн"
+        type: number
+        required: false
+        min: 0
+        max: 100000000
+        help: "Потрібна лише якщо оформлюєте страхування."
+
+  # ---------- БЛОК 4 ----------
+  - id: service
+    title: "Блок 4 з 5. Транспорт і послуги"
+    questions:
+      - id: vehicle_type
+        text: "Який транспорт потрібен?"
+        type: choice
+        options:
+          - {value: courier,      label: "Легкове авто / кур'єр (до 500 кг)"}
+          - {value: gazelle,      label: "Газель (до 1.5 т, 9 м³)"}
+          - {value: truck_5t,     label: "Вантажівка 5 т (25 м³)"}
+          - {value: truck_10t,    label: "Вантажівка 10 т (45 м³)"}
+          - {value: truck_20t,    label: "Фура 20 т (86 м³)"}
+          - {value: refrigerator, label: "Рефрижератор"}
+        help: "Не знаєте — оберіть приблизно, менеджер підбере точніше."
+      - id: temperature_mode
+        text: "Температурний режим"
+        type: choice
+        default: none
+        options:
+          - {value: none,    label: "Не потрібен"}
+          - {value: chilled, label: "Охолодження (0…+8 °C)"}
+          - {value: frozen,  label: "Заморозка (-18 °C)"}
+      - id: loaders
+        text: "Скільки потрібно вантажників?"
+        type: int
+        min: 0
+        max: 6
+        default: 0
+      - id: tail_lift
+        text: "Потрібен гідроборт?"
+        type: bool
+        default: false
+      - id: urgency
+        text: "Терміновість"
+        type: choice
+        options:
+          - {value: standard, label: "Стандартно (2-3 дні)"}
+          - {value: next_day, label: "Наступного дня"}
+          - {value: today,    label: "Сьогодні"}
+          - {value: express,  label: "Експрес / окреме авто"}
+
+  # ---------- БЛОК 5 ----------
+  - id: terms
+    title: "Блок 5 з 5. Дата й оплата"
+    questions:
+      - id: pickup_date
+        text: "Дата подачі авто"
+        type: date
+        help: "У форматі 25.12.2026, або словами: сьогодні / завтра / післязавтра"
+      - id: payment_method
+        text: "Спосіб оплати"
+        type: choice
+        options:
+          - {value: cash,     label: "Готівка"}
+          - {value: card,     label: "Карта / переказ"}
+          - {value: invoice,  label: "Безготівковий розрахунок (рахунок)"}
+      - id: vat_invoice
+        text: "Потрібні документи з ПДВ?"
+        type: bool
+        default: false
+        depends_on: {question: payment_method, equals: invoice}
+      - id: insurance
+        text: "Оформити страхування вантажу?"
+        type: bool
+        default: false
+      - id: comment
+        text: "Коментар до заявки"
+        type: text
+        required: false
+        max_len: 500
+        help: "Особливості завантаження, пропуск на територію тощо."
+      - id: manager_call
+        text: "Підключити менеджера до розмови після розрахунку?"
+        type: bool
+        default: false

@@ -1,0 +1,10 @@
+# --- Ядро (розрахунок, анкета, CLI) ---
+# працює на чистій стандартній бібліотеці Python 3.10+
+PyYAML>=6.0            # читання config/questions.yaml і config/tariffs.yaml
+
+# --- HTTP API (опційно: adapter для CRM / веб-форми) ---
+fastapi>=0.110
+uvicorn[standard]>=0.27
+
+# --- Telegram-бот (опційно: підключається пізніше) ---
+aiogram>=3.4
