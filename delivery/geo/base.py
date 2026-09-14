@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
+import logging
 import re
 from typing import Protocol, Sequence, runtime_checkable
 
 from ..models import RouteInfo
+
+log = logging.getLogger("delivery.geo")
 
 
 class GeoError(Exception):
@@ -46,9 +49,13 @@ def build_provider(settings) -> "DistanceProvider":
         kind = (kind or "").lower()
         if kind == "google":
             if not settings.google_maps_api_key:
-                raise GeoError(
-                    "GEO_PROVIDER=google, але GOOGLE_MAPS_API_KEY не заданий у .env"
+                # Не валимо застосунок: працюємо на резерві, але гучно попереджаємо.
+                log.warning(
+                    "GEO_PROVIDER=google, але GOOGLE_MAPS_API_KEY порожній у .env — "
+                    "кілометраж рахується резервним способом (%s) і буде приблизним.",
+                    settings.geo_fallback or "offline",
                 )
+                return make(settings.geo_fallback or "offline")
             return GoogleProvider(
                 api_key=settings.google_maps_api_key,
                 timeout=settings.geo_timeout_seconds,
@@ -62,8 +69,9 @@ def build_provider(settings) -> "DistanceProvider":
 
     primary = make(settings.geo_provider)
     chain = [primary]
-    if settings.geo_fallback and settings.geo_fallback != settings.geo_provider:
-        chain.append(make(settings.geo_fallback))
+    fallback = settings.geo_fallback
+    if fallback and fallback != settings.geo_provider and fallback != primary.name:
+        chain.append(make(fallback))
 
     provider = primary if len(chain) == 1 else ChainProvider(chain)
     return CachedProvider(provider, db_path=settings.path(settings.db_path))

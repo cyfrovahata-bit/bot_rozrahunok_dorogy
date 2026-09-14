@@ -98,5 +98,40 @@ class CacheTest(unittest.TestCase):
             self.assertEqual(first.distance_km, second.distance_km)
 
 
+class BuildProviderTest(unittest.TestCase):
+    """Збірка провайдера за налаштуваннями."""
+
+    def _settings(self, **kwargs):
+        from dataclasses import replace
+        from delivery.config import Settings
+
+        with tempfile.TemporaryDirectory() as tmp:
+            base = replace(
+                Settings.load(),
+                db_path=str(Path(tmp) / "db.sqlite3"),
+                **kwargs,
+            )
+            yield base
+
+    def test_google_without_key_falls_back_instead_of_crashing(self):
+        from delivery.geo.base import build_provider
+
+        for settings in self._settings(
+            geo_provider="google", geo_fallback="offline", google_maps_api_key=""
+        ):
+            with self.assertLogs("delivery.geo", level="WARNING") as logs:
+                provider = build_provider(settings)
+            self.assertTrue(any("GOOGLE_MAPS_API_KEY" in m for m in logs.output))
+            # провайдер робочий, а не заглушка
+            self.assertGreater(provider.route(["Київ", "Львів"]).distance_km, 400)
+
+    def test_offline_provider_built_by_default(self):
+        from delivery.geo.base import build_provider
+
+        for settings in self._settings(geo_provider="offline", geo_fallback="offline"):
+            provider = build_provider(settings)
+            self.assertTrue(provider.route(["Київ", "Одеса"]).is_estimate)
+
+
 if __name__ == "__main__":
     unittest.main()
