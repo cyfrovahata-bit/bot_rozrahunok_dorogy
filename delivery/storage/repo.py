@@ -35,6 +35,7 @@ CREATE TABLE IF NOT EXISTS orders (
     quote            TEXT,
     total            REAL,
     status           TEXT NOT NULL DEFAULT 'new',
+    manager_ref      TEXT,
     created_at       TEXT NOT NULL DEFAULT (datetime('now'))
 );
 CREATE INDEX IF NOT EXISTS idx_orders_status ON orders (status, created_at);
@@ -89,6 +90,17 @@ class Repository:
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         with self._connect() as conn:
             conn.executescript(SCHEMA)
+            self._migrate(conn)
+
+    @staticmethod
+    def _migrate(conn: sqlite3.Connection) -> None:
+        """Доводить стару базу до поточної схеми (виконується при кожному старті)."""
+        columns = {row[1] for row in conn.execute("PRAGMA table_info(orders)")}
+        if "manager_ref" not in columns:
+            conn.execute("ALTER TABLE orders ADD COLUMN manager_ref TEXT")
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_orders_manager ON orders (manager_ref, status)"
+        )
 
     def _connect(self) -> sqlite3.Connection:
         conn = sqlite3.connect(str(self.db_path), timeout=10)
@@ -153,7 +165,7 @@ class Repository:
                     "UPDATE orders SET session_id=?, channel=?, external_user_id=?,"
                     " answers=?, quote=?, total=?, status=? WHERE id=?",
                     (*payload, order.id),
-                )
+                )   # manager_ref навмисно не чіпаємо — ним керує assign_order
                 return order.id
             cursor = conn.execute(
                 "INSERT INTO orders (session_id, channel, external_user_id, answers,"
@@ -174,7 +186,10 @@ class Repository:
         return data
 
     def recent_orders(self, limit: int = 20, status: str | None = None) -> list[dict[str, Any]]:
-        query = "SELECT id, created_at, total, status, answers FROM orders"
+        query = (
+            "SELECT id, created_at, total, status, answers, external_user_id,"
+            " manager_ref FROM orders"
+        )
         params: tuple[Any, ...] = ()
         if status:
             query += " WHERE status = ?"
@@ -182,16 +197,54 @@ class Repository:
         query += " ORDER BY id DESC LIMIT ?"
         with self._connect() as conn:
             rows = conn.execute(query, (*params, limit)).fetchall()
-        out = []
-        for row in rows:
-            data = dict(row)
-            data["answers"] = json.loads(data["answers"])
-            out.append(data)
-        return out
+        return [self._with_answers(row) for row in rows]
 
     def set_order_status(self, order_id: int, status: str) -> None:
         with self._connect() as conn:
             conn.execute("UPDATE orders SET status = ? WHERE id = ?", (status, order_id))
+
+    def assign_order(self, order_id: int, manager_ref: str) -> bool:
+        """Закріпити заявку за менеджером. False = заявки не існує."""
+        with self._connect() as conn:
+            cursor = conn.execute(
+                "UPDATE orders SET manager_ref = ? WHERE id = ?",
+                (str(manager_ref), order_id),
+            )
+            return cursor.rowcount > 0
+
+    def orders_for_manager(
+        self, manager_ref: str, limit: int = 20, include_closed: bool = False
+    ) -> list[dict[str, Any]]:
+        """Замовлення конкретного менеджера — для команди /my."""
+        query = (
+            "SELECT id, created_at, total, status, answers, external_user_id"
+            " FROM orders WHERE manager_ref = ?"
+        )
+        if not include_closed:
+            query += " AND status NOT IN ('done', 'cancelled')"
+        query += " ORDER BY id DESC LIMIT ?"
+        with self._connect() as conn:
+            rows = conn.execute(query, (str(manager_ref), limit)).fetchall()
+        return [self._with_answers(row) for row in rows]
+
+    def unassigned_orders(self, limit: int = 20) -> list[dict[str, Any]]:
+        """Заявки, які ще ніхто не взяв."""
+        with self._connect() as conn:
+            rows = conn.execute(
+                "SELECT id, created_at, total, status, answers, external_user_id"
+                " FROM orders WHERE manager_ref IS NULL"
+                " AND status NOT IN ('done', 'cancelled')"
+                " ORDER BY id DESC LIMIT ?",
+                (limit,),
+            ).fetchall()
+        return [self._with_answers(row) for row in rows]
+
+    @staticmethod
+    def _with_answers(row: sqlite3.Row) -> dict[str, Any]:
+        data = dict(row)
+        if isinstance(data.get("answers"), str):
+            data["answers"] = json.loads(data["answers"])
+        return data
 
     # ---------------- підключення менеджера ----------------
     def create_handoff(self, handoff: Handoff) -> int:

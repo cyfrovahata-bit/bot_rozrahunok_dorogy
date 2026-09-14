@@ -86,6 +86,7 @@ class Settings:
     db_path: str = "data/delivery.sqlite3"
     tariffs_path: str = "config/tariffs.yaml"
     questions_path: str = "config/questions.yaml"
+    statuses_path: str = "config/statuses.yaml"
 
     # Робочий час менеджерів
     work_hours_start: int = 9
@@ -114,6 +115,7 @@ class Settings:
             db_path=os.getenv("DB_PATH") or _default_db_path(),
             tariffs_path=os.getenv("TARIFFS_PATH") or "config/tariffs.yaml",
             questions_path=os.getenv("QUESTIONS_PATH") or "config/questions.yaml",
+            statuses_path=os.getenv("STATUSES_PATH") or "config/statuses.yaml",
             work_hours_start=_int("WORK_HOURS_START", 9),
             work_hours_end=_int("WORK_HOURS_END", 19),
             work_days=days,

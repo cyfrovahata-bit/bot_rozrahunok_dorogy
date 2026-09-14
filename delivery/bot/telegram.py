@@ -47,6 +47,10 @@ CB_BACK = "back"
 CB_MANAGER = "manager"
 CB_RESTART = "restart"
 CB_CLAIM = "claim"    # claim:<handoff_id>
+CB_ORDER = "ord"      # ord:<order_id>            — картка замовлення
+CB_TAKE_ORDER = "to"  # to:<order_id>             — взяти замовлення собі
+CB_WRITE = "wr"       # wr:<order_id>             — почати розмову з клієнтом
+CB_STATUS = "st"      # st:<order_id>:<status_id> — надіслати статус
 
 
 # --------------------------------------------------------------------------
@@ -81,6 +85,43 @@ def quote_keyboard() -> InlineKeyboardMarkup:
             [InlineKeyboardButton(text="🔄 Новий розрахунок", callback_data=CB_RESTART)],
         ]
     )
+
+
+def order_keyboard(order_id: int, statuses, assigned: bool) -> InlineKeyboardMarkup:
+    """Кнопки під карткою замовлення для менеджера."""
+    if not assigned:
+        return InlineKeyboardMarkup(
+            inline_keyboard=[
+                [InlineKeyboardButton(text="📋 Взяти замовлення",
+                                      callback_data=f"{CB_TAKE_ORDER}:{order_id}")]
+            ]
+        )
+    rows: list[list[InlineKeyboardButton]] = []
+    buttons = [
+        InlineKeyboardButton(text=status.label, callback_data=f"{CB_STATUS}:{order_id}:{status.id}")
+        for status in statuses
+    ]
+    # по дві кнопки в ряд
+    for i in range(0, len(buttons), 2):
+        rows.append(buttons[i : i + 2])
+    rows.append(
+        [InlineKeyboardButton(text="💬 Написати клієнту",
+                              callback_data=f"{CB_WRITE}:{order_id}")]
+    )
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def orders_list_keyboard(orders: list) -> InlineKeyboardMarkup:
+    """Список замовлень: по кнопці на кожне."""
+    rows = []
+    for order in orders:
+        answers = order.get("answers") or {}
+        route = f"{answers.get('pickup_city', '?')}→{answers.get('dropoff_city', '?')}"
+        rows.append(
+            [InlineKeyboardButton(text=f"№{order['id']} · {route}",
+                                  callback_data=f"{CB_ORDER}:{order['id']}")]
+        )
+    return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
 def claim_keyboard(handoff_id: int) -> InlineKeyboardMarkup:
@@ -190,6 +231,35 @@ class DeliveryBot:
             await self._request_manager(message, session, result.order,
                                         reason="запит у анкеті")
 
+    def _order_card(self, order: dict) -> str:
+        answers = order.get("answers") or {}
+        total = f"{order['total']:,.0f} грн".replace(",", " ") if order.get("total") else "—"
+        lines = [
+            f"<b>Заявка №{order['id']}</b> · {order.get('status', 'new')}",
+            f"Клієнт: {answers.get('client_name', '—')}, {answers.get('client_phone', '—')}",
+            f"Маршрут: {answers.get('pickup_city', '?')} → {answers.get('dropoff_city', '?')}",
+            f"Вантаж: {answers.get('weight_kg', '?')} кг / {answers.get('volume_m3', 0)} м³",
+            f"Авто: {answers.get('vehicle_type', '—')}, подача {answers.get('pickup_date', '—')}",
+            f"Сума: {total}",
+        ]
+        if answers.get("comment"):
+            lines.append(f"Коментар: {answers['comment']}")
+        if not order.get("external_user_id"):
+            lines.append("⚠ Клієнта немає в Telegram — тільки телефон.")
+        return "\n".join(lines)
+
+    async def _show_order(self, message: Message, order_id: int, manager_ref: str) -> None:
+        order = self.repo.get_order(order_id)
+        if not order:
+            await message.answer(f"Заявку №{order_id} не знайдено.")
+            return
+        assigned = str(order.get("manager_ref") or "") == str(manager_ref)
+        await message.answer(
+            self._order_card(order),
+            reply_markup=order_keyboard(order_id, self.manager.statuses, assigned),
+            parse_mode=ParseMode.HTML,
+        )
+
     async def _request_manager(self, message: Message, session, order=None,
                                reason: str = "кнопка «Підключити менеджера»") -> None:
         handoff = self.manager.request(
@@ -230,12 +300,14 @@ class DeliveryBot:
                 lines += [
                     "",
                     "Менеджеру:",
-                    "/queue — черга запитів",
+                    "/my — мої замовлення (статуси, написати клієнту)",
+                    "/free — вільні заявки",
+                    "/queue — черга запитів на розмову",
                     "/take <id> — взяти запит",
                     "/close — завершити розмову",
                     "/orders — останні заявки",
                     "/stats — статистика",
-                    "/reload — перечитати тарифи",
+                    "/reload — перечитати тарифи і статуси",
                 ]
             await message.answer("\n".join(lines))
 
@@ -295,6 +367,41 @@ class DeliveryBot:
                 return
             await message.answer("Активних розмов немає.")
 
+        @dp.message(Command("my"))
+        async def my_orders(message: Message) -> None:
+            """Замовлення конкретного менеджера з кнопками керування."""
+            if not self.is_manager(message.chat.id):
+                return
+            orders = self.manager.my_orders(str(message.chat.id))
+            if not orders:
+                free = self.repo.unassigned_orders(limit=10)
+                if free:
+                    await message.answer(
+                        "У вас немає замовлень у роботі. Вільні заявки:",
+                        reply_markup=orders_list_keyboard(free),
+                    )
+                else:
+                    await message.answer("Замовлень у роботі немає.")
+                return
+            await message.answer(
+                f"Ваші замовлення ({len(orders)}):",
+                reply_markup=orders_list_keyboard(orders),
+            )
+
+        @dp.message(Command("free"))
+        async def free_orders(message: Message) -> None:
+            """Заявки, які ще ніхто не взяв."""
+            if not self.is_manager(message.chat.id):
+                return
+            orders = self.repo.unassigned_orders(limit=10)
+            if not orders:
+                await message.answer("Вільних заявок немає — усі в роботі.")
+                return
+            await message.answer(
+                f"Вільні заявки ({len(orders)}):",
+                reply_markup=orders_list_keyboard(orders),
+            )
+
         @dp.message(Command("orders"))
         async def orders(message: Message) -> None:
             if not self.is_manager(message.chat.id):
@@ -303,15 +410,9 @@ class DeliveryBot:
             if not rows:
                 await message.answer("Заявок ще немає.")
                 return
-            lines = []
-            for row in rows:
-                answers = row["answers"]
-                total = f"{row['total']:,.0f}".replace(",", " ") if row["total"] else "—"
-                lines.append(
-                    f"#{row['id']} {answers.get('pickup_city', '?')}→"
-                    f"{answers.get('dropoff_city', '?')} · {total} · {row['status']}"
-                )
-            await message.answer("\n".join(lines))
+            await message.answer(
+                "Останні заявки:", reply_markup=orders_list_keyboard(rows)
+            )
 
         @dp.message(Command("stats"))
         async def stats(message: Message) -> None:
@@ -331,19 +432,78 @@ class DeliveryBot:
                 return
             try:
                 tariff = self.service.reload_tariff()
+                statuses = self.manager.reload_statuses()
             except Exception as exc:
-                await message.answer(f"⚠ Помилка в тарифах: {exc}")
+                await message.answer(f"⚠ Помилка в конфігурації: {exc}")
                 return
-            await message.answer(f"Тарифи перечитано, версія {tariff.version}.")
+            await message.answer(
+                f"Перечитано: тарифи (версія {tariff.version}), "
+                f"статусів — {len(statuses)}."
+            )
 
         # ---------- кнопки ----------
+        @dp.callback_query(F.data.startswith(f"{CB_ORDER}:"))
+        async def open_order(callback: CallbackQuery) -> None:
+            if not self.is_manager(callback.message.chat.id):
+                await callback.answer()
+                return
+            await callback.answer()
+            order_id = int(callback.data.split(":", 1)[1])
+            await self._show_order(callback.message, order_id, str(callback.message.chat.id))
+
+        @dp.callback_query(F.data.startswith(f"{CB_TAKE_ORDER}:"))
+        async def take_order(callback: CallbackQuery) -> None:
+            if not self.is_manager(callback.message.chat.id):
+                await callback.answer()
+                return
+            order_id = int(callback.data.split(":", 1)[1])
+            manager_ref = str(callback.message.chat.id)
+            if self.repo.assign_order(order_id, manager_ref):
+                await callback.answer("Замовлення ваше")
+                await self._show_order(callback.message, order_id, manager_ref)
+            else:
+                await callback.answer("Заявку не знайдено", show_alert=True)
+
+        @dp.callback_query(F.data.startswith(f"{CB_WRITE}:"))
+        async def write_to_client(callback: CallbackQuery) -> None:
+            if not self.is_manager(callback.message.chat.id):
+                await callback.answer()
+                return
+            order_id = int(callback.data.split(":", 1)[1])
+            result = self.manager.open_conversation(order_id, str(callback.message.chat.id))
+            await callback.answer()
+            await callback.message.answer(
+                ("💬 " if result.ok else "⚠ ") + result.message
+            )
+
+        @dp.callback_query(F.data.startswith(f"{CB_STATUS}:"))
+        async def send_status(callback: CallbackQuery) -> None:
+            if not self.is_manager(callback.message.chat.id):
+                await callback.answer()
+                return
+            _, raw_order_id, status_id = callback.data.split(":", 2)
+            result = self.manager.send_status(
+                int(raw_order_id), str(callback.message.chat.id), status_id
+            )
+            await callback.answer(result.message, show_alert=not result.ok)
+            if result.ok:
+                await self._show_order(
+                    callback.message, int(raw_order_id), str(callback.message.chat.id)
+                )
+
         @dp.callback_query(F.data.startswith(f"{CB_CLAIM}:"))
         async def claim(callback: CallbackQuery) -> None:
             handoff_id = int(callback.data.split(":", 1)[1])
             result = self.manager.claim(handoff_id, str(callback.message.chat.id))
             await callback.answer(result.message, show_alert=not result.ok)
-            if result.ok:
-                await callback.message.edit_reply_markup(reply_markup=None)
+            if not result.ok:
+                return
+            await callback.message.edit_reply_markup(reply_markup=None)
+            if result.backlog:
+                history = "\n".join(f"• {text}" for text in result.backlog)
+                await callback.message.answer(
+                    f"Клієнт писав, поки чекав:\n{history}"
+                )
 
         @dp.callback_query(F.data == CB_MANAGER)
         async def manager_button(callback: CallbackQuery) -> None:
@@ -419,6 +579,13 @@ class DeliveryBot:
 
             session = self._session(message.from_user.id)
             if session is None:
+                # менеджер відповідає на картку, не відкривши розмову — попереджаємо,
+                # інакше повідомлення мовчки нікуди не йде
+                if self.is_manager(message.chat.id):
+                    hint = self.manager.hint_for_idle_manager(chat_id)
+                    if hint:
+                        await message.answer(hint)
+                        return
                 await message.answer("Щоб почати розрахунок, натисніть /start.")
                 return
             result = self.service.answer(session, message.text)

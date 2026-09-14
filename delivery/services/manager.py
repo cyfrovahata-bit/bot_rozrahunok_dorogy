@@ -20,6 +20,7 @@ from typing import Any, Protocol
 from ..config import Settings
 from ..models import Order
 from ..storage import Handoff, Repository
+from .statuses import StatusCatalog, StatusError, load_statuses, order_context
 
 
 class Notifier(Protocol):
@@ -37,6 +38,7 @@ class HandoffResult:
     ok: bool
     handoff_id: int | None = None
     message: str = ""
+    backlog: tuple[str, ...] = ()   # що клієнт написав, поки чекав
 
 
 class ManagerService:
@@ -45,10 +47,23 @@ class ManagerService:
         repo: Repository,
         settings: Settings,
         notifier: Notifier | None = None,
+        statuses: StatusCatalog | None = None,
     ):
         self.repo = repo
         self.settings = settings
         self.notifier = notifier
+        self._statuses = statuses
+
+    @property
+    def statuses(self) -> StatusCatalog:
+        """Шаблони повідомлень клієнту (config/statuses.yaml)."""
+        if self._statuses is None:
+            self._statuses = load_statuses(self.settings.path(self.settings.statuses_path))
+        return self._statuses
+
+    def reload_statuses(self) -> StatusCatalog:
+        self._statuses = load_statuses(self.settings.path(self.settings.statuses_path))
+        return self._statuses
 
     # ---------------- робочий час ----------------
     def is_working_hours(self, now: datetime | None = None) -> bool:
@@ -131,6 +146,12 @@ class ManagerService:
                                      message="Ви вже ведете цю розмову.")
             return HandoffResult(ok=False, message="Заявку вже взяв інший менеджер.")
 
+        if handoff.get("order_id"):
+            self.repo.assign_order(handoff["order_id"], str(manager_ref))
+
+        backlog = tuple(
+            m["text"] for m in self.repo.history(handoff_id) if m["sender"] == "client"
+        )
         if self.notifier:
             self.notifier.send_to_client(
                 handoff["client_ref"],
@@ -141,7 +162,9 @@ class ManagerService:
                 f"Ви на зв'язку з клієнтом {handoff['client_name'] or handoff['client_ref']}. "
                 "Усі ваші повідомлення йдуть клієнту. /close — завершити.",
             )
-        return HandoffResult(ok=True, handoff_id=handoff_id, message="Розмову розпочато.")
+        return HandoffResult(
+            ok=True, handoff_id=handoff_id, message="Розмову розпочато.", backlog=backlog
+        )
 
     def close(self, handoff_id: int, by: str = "manager") -> HandoffResult:
         handoff = self.repo.get_handoff(handoff_id)
@@ -183,6 +206,120 @@ class ManagerService:
         if self.notifier:
             self.notifier.send_to_client(handoff["client_ref"], f"👤 Менеджер: {text}")
         return True
+
+    # ---------------- менеджер починає розмову сам ----------------
+    def open_conversation(self, order_id: int, manager_ref: str) -> HandoffResult:
+        """Менеджер пише клієнту першим (авто виїхало, затримка тощо)."""
+        order = self.repo.get_order(order_id)
+        if not order:
+            return HandoffResult(ok=False, message=f"Заявку №{order_id} не знайдено.")
+        client_ref = order.get("external_user_id")
+        if not client_ref:
+            phone = (order.get("answers") or {}).get("client_phone") or "—"
+            return HandoffResult(
+                ok=False,
+                message=f"Заявку №{order_id} створено не через Telegram — "
+                f"написати в чат неможливо. Телефон клієнта: {phone}",
+            )
+
+        self.repo.assign_order(order_id, str(manager_ref))
+
+        existing = self.repo.active_handoff_for_client(str(client_ref))
+        if existing and str(existing.get("manager_ref") or "") == str(manager_ref):
+            return HandoffResult(
+                ok=True, handoff_id=existing["id"], message="Розмову вже відкрито."
+            )
+        if existing and existing["status"] == "active":
+            return HandoffResult(
+                ok=False,
+                message="З цим клієнтом уже спілкується інший менеджер.",
+            )
+
+        # менеджер може вести лише одну розмову — закриваємо попередню
+        previous = self.repo.active_handoff_for_manager(str(manager_ref))
+        if previous:
+            self.close(previous["id"], by="manager")
+
+        answers = order.get("answers") or {}
+        handoff = Handoff(
+            id=existing["id"] if existing else None,
+            session_id=order.get("session_id") or "—",
+            channel=order.get("channel") or "telegram",
+            client_ref=str(client_ref),
+            client_name=str(answers.get("client_name") or ""),
+            client_phone=str(answers.get("client_phone") or ""),
+            order_id=order_id,
+            reason="менеджер написав першим",
+        )
+        handoff_id = existing["id"] if existing else self.repo.create_handoff(handoff)
+        self.repo.claim_handoff(handoff_id, str(manager_ref))
+        return HandoffResult(
+            ok=True,
+            handoff_id=handoff_id,
+            message=f"Розмову за заявкою №{order_id} відкрито. "
+            "Ваші повідомлення йдуть клієнту, /close — завершити.",
+        )
+
+    def send_status(self, order_id: int, manager_ref: str, status_id: str) -> HandoffResult:
+        """Надіслати клієнту готове повідомлення про хід замовлення."""
+        order = self.repo.get_order(order_id)
+        if not order:
+            return HandoffResult(ok=False, message=f"Заявку №{order_id} не знайдено.")
+        try:
+            status = self.statuses.get(status_id)
+        except StatusError as exc:
+            return HandoffResult(ok=False, message=str(exc))
+
+        client_ref = order.get("external_user_id")
+        if not client_ref:
+            phone = (order.get("answers") or {}).get("client_phone") or "—"
+            return HandoffResult(
+                ok=False,
+                message=f"Клієнта немає в Telegram — зателефонуйте: {phone}",
+            )
+
+        text = status.render(order_context(order))
+        self.repo.assign_order(order_id, str(manager_ref))
+        if status.order_status:
+            self.repo.set_order_status(order_id, status.order_status)
+
+        handoff = self.repo.active_handoff_for_client(str(client_ref))
+        if handoff:
+            self.repo.log_message(handoff["id"], "manager", text)
+
+        if self.notifier:
+            self.notifier.send_to_client(str(client_ref), text)
+        return HandoffResult(
+            ok=True,
+            handoff_id=handoff["id"] if handoff else None,
+            message=f"Клієнту надіслано: {status.label}",
+        )
+
+    def my_orders(self, manager_ref: str, include_closed: bool = False) -> list[dict[str, Any]]:
+        return self.repo.orders_for_manager(str(manager_ref), include_closed=include_closed)
+
+    def hint_for_idle_manager(self, manager_ref: str) -> str | None:
+        """Підказка менеджеру, який пише текст, не відкривши розмову.
+
+        Саме тут губилися повідомлення: менеджер відповідав на картку заявки,
+        не натиснувши «Взяти в роботу», і клієнт нічого не отримував.
+        """
+        if self.repo.active_handoff_for_manager(str(manager_ref)):
+            return None
+        queue = self.waiting()
+        if queue:
+            ids = ", ".join(f"#{item['id']}" for item in queue[:5])
+            return (
+                "⚠ Повідомлення НЕ надіслано клієнту — ви ще не взяли заявку в роботу.\n"
+                f"У черзі: {ids}. Натисніть «Взяти в роботу» під карткою "
+                "або надішліть /take <номер>."
+            )
+        if self.my_orders(manager_ref):
+            return (
+                "⚠ Повідомлення нікуди не пішло — активної розмови немає.\n"
+                "Відкрийте замовлення через /my і натисніть «Написати клієнту»."
+            )
+        return None
 
     def waiting(self) -> list[dict[str, Any]]:
         """Заявки в черзі (для команди /queue у менеджера)."""
