@@ -52,6 +52,7 @@ Railway → **Variables**. Файл `.env` у контейнер не потра
 | `GEO_FALLBACK` | `offline` | бажано |
 | `ORDERS_CHAT_ID` | чат, куди дублювати всі заявки | ні |
 | `WORK_HOURS_START` / `WORK_HOURS_END` | `9` / `19` | ні |
+| `TIMEZONE` | `Europe/Kyiv` — інакше робочі години рахуються за UTC | так |
 | `DB_PATH` | **не задавайте** — підставиться `/data/delivery.sqlite3` | ні |
 
 ### 4. Деплой

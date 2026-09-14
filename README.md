@@ -24,7 +24,7 @@ python -m delivery.cli --demo         # прогнати приклад заяв
 python -m delivery.cli                # пройти анкету вручну
 python -m delivery.cli --distance Київ Львів
 python -m delivery.cli --orders       # останні заявки
-python -m unittest discover tests     # 92 тести
+python -m unittest discover tests     # 102 тести
 ```
 
 ---
@@ -113,7 +113,9 @@ python -m unittest discover tests     # 92 тести
 а попереджає: повідомлення клієнту **не надіслано**, ось номери заявок у черзі.
 
 Поза робочим часом (`WORK_HOURS_*`) клієнт отримує чесне попередження,
-коли з ним зв'яжуться, а заявка все одно лягає в чергу.
+коли з ним зв'яжуться, а заявка все одно лягає в чергу. Час рахується
+за поясом бізнесу (`TIMEZONE`, типово `Europe/Kyiv`), а не за UTC-часом
+сервера — інакше графік зсувався б на 2-3 години.
 
 ---
 
@@ -198,7 +200,7 @@ delivery/
   bot/telegram.py         Telegram (aiogram) — опційно
   api/app.py              HTTP API (FastAPI) — опційно
   cli.py                  консольний режим
-tests/                    92 тести
+tests/                    102 тести
 ```
 
 ---

@@ -67,7 +67,7 @@ class ManagerService:
 
     # ---------------- робочий час ----------------
     def is_working_hours(self, now: datetime | None = None) -> bool:
-        now = now or datetime.now()
+        now = now or self.settings.now()
         if (now.weekday() + 1) not in self.settings.work_days:
             return False
         return self.settings.work_hours_start <= now.hour < self.settings.work_hours_end

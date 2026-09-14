@@ -2,9 +2,13 @@
 
 from __future__ import annotations
 
+import logging
 import os
 from dataclasses import dataclass, field
+from datetime import datetime
 from pathlib import Path
+
+log = logging.getLogger("delivery.config")
 
 ROOT = Path(__file__).resolve().parent.parent
 
@@ -89,6 +93,7 @@ class Settings:
     statuses_path: str = "config/statuses.yaml"
 
     # Робочий час менеджерів
+    timezone: str = "Europe/Kyiv"
     work_hours_start: int = 9
     work_hours_end: int = 19
     work_days: tuple[int, ...] = (1, 2, 3, 4, 5)   # 1 = понеділок
@@ -116,6 +121,7 @@ class Settings:
             tariffs_path=os.getenv("TARIFFS_PATH") or "config/tariffs.yaml",
             questions_path=os.getenv("QUESTIONS_PATH") or "config/questions.yaml",
             statuses_path=os.getenv("STATUSES_PATH") or "config/statuses.yaml",
+            timezone=(os.getenv("TIMEZONE") or os.getenv("TZ") or "Europe/Kyiv").strip(),
             work_hours_start=_int("WORK_HOURS_START", 9),
             work_hours_end=_int("WORK_HOURS_END", 19),
             work_days=days,
@@ -127,6 +133,25 @@ class Settings:
     def path(self, value: str) -> Path:
         p = Path(value)
         return p if p.is_absolute() else ROOT / p
+
+    def now(self) -> datetime:
+        """Поточний час у часовому поясі бізнесу, а не контейнера.
+
+        Сервери (зокрема Railway) живуть за UTC, тому datetime.now() дав би
+        зсув на 2-3 години — робочі години менеджерів рахувалися б неправильно.
+        """
+        try:
+            from zoneinfo import ZoneInfo
+
+            return datetime.now(ZoneInfo(self.timezone))
+        except Exception as exc:   # немає бази часових поясів або хибна назва
+            log.warning(
+                "Не вдалося застосувати часовий пояс '%s' (%s) — "
+                "використано час сервера.",
+                self.timezone,
+                exc,
+            )
+            return datetime.now()
 
     def storage_warnings(self) -> list[str]:
         """Попередження про ризик втрати даних (насамперед на Railway).
